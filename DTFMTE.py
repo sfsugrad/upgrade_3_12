@@ -6,10 +6,6 @@ import argparse
 
 import re
 
-import codecs
-
-import string
-
 import os
 
 from datetime import datetime, timedelta
@@ -160,16 +156,17 @@ def main(argv=None):
             # infile = open(r'\\d1wrptfsrnp1\dev\APPS\DTC\DTFPART' + '\\' + folder + '\\' + folder + '_OUTPUT_' + yesterday_date + '.txt','rb')
 
             infile = open(
-                filepath + 'DTC\DTFPART' + '\\' + folder + '\\' + folder + '_OUTPUT_' + yesterday_date + '.txt', 'rb')
+                filepath + 'DTC\\DTFPART' + '\\' + folder + '\\' + folder + '_OUTPUT_' + yesterday_date + '.txt',
+                'r',
+                encoding='utf-8'
+            )
 
             # print(infile)
 
             parse_stuff(infile, folder, out_file)
 
-        except IOError as (errno, strerror):
-
-            print
-            "I/O error({0}): {1}".format(errno, strerror)
+        except OSError as e:
+            print(f"I/O error({e.errno}): {e.strerror}")
 
 
 if __name__ == '__main__':
