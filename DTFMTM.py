@@ -6,9 +6,6 @@ import argparse
 
 import re
 
-import codecs
-
-import string
 
 import os
 
@@ -65,7 +62,7 @@ def parse_stuff(infile, folder, outfile):
     if not os.path.exists(outfile + 'MTGO\\' + today):
         os.mkdir(outfile + 'MTGO\\' + today)
 
-    out_file = open(outfile + 'MTGO\\' + today + '\\' + folder + '.txt', 'w')
+    out_file = open(outfile + 'MTGO\\' + today + '\\' + folder + '.txt', 'w', encoding='utf-8')
 
     # r'\\d1wrptfsrprd3\reports\Firm10\MTGO\
 
@@ -160,16 +157,16 @@ def main(argv=None):
             # infile = open(r'\\d1wrptfsrnp1\dev\APPS\DTC\DTFPART' + '\\' + folder + '\\' + folder + '_OUTPUT_' + yesterday_date + '.txt','rb')
 
             infile = open(
-                filepath + 'DTC\DTFPART' + '\\' + folder + '\\' + folder + '_OUTPUT_' + yesterday_date + '.txt', 'rb')
+                filepath + 'DTC\\DTFPART' + '\\' + folder + '\\' + folder + '_OUTPUT_' + yesterday_date + '.txt',
+                'r',
+                encoding='utf-8'
+            )
 
             # print(infile)
 
             parse_stuff(infile, folder, out_file)
-
-        except IOError as (errno, strerror):
-
-            print
-            "I/O error({0}): {1}".format(errno, strerror)
+        except OSError as e:
+            print(f"I/O error({e.errno}): {e.strerror}")
 
 
 if __name__ == '__main__':
