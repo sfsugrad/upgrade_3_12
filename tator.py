@@ -6,9 +6,7 @@ import sys
 
 import time
 
-from datetime import datetime
-
-import pytz
+from datetime import datetime, timezone
 
 parser = argparse.ArgumentParser(description='add annotations to grafana')
 
@@ -65,12 +63,15 @@ if __name__ == '__main__':
 
     if args.time is None and args.timeStr is None:
 
-        args.time = time.time() * 1000
+        args.time = int(time.time() * 1000)
 
     elif args.time is None and args.timeStr is not None:
 
         args.time = int(
-            pytz.utc.localize(datetime.strptime(args.timeStr, '%Y-%m-%dT%H:%M:%S'), is_dst=False).timestamp() * 1000)
+            datetime.strptime(args.timeStr, '%Y-%m-%dT%H:%M:%S')
+            .replace(tzinfo=timezone.utc)
+            .timestamp() * 1000
+        )
 
     r = requests.post(
 
@@ -84,7 +85,7 @@ if __name__ == '__main__':
 
     if r.status_code != 200:
 
-        print(str(r.status_code) + ': ' + r.text)
+        print(f"{r.status_code}: {r.text}")
 
         sys.exit(1)
 
