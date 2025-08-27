@@ -43,30 +43,32 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    apollo = SqlWrapper(
-        {
-            "env": args.environment,
-            "method": "pyodbc",
-            "server": "apollo",
-            "db": "worldwide",
-            "debug": True,
-            "format": "json",
-        }
-    )
-
-    batch = SqlWrapper(
-        {
-            "env": args.environment,
-            "method": "psycopg2",
-            "server": f"pg{args.environment}",
-            "db": "batch",
-            "credentials": {"user": args.username, "password": args.password},
-            "debug": True,
-            "format": "json",
-        }
-    )
-
+    apollo: SqlWrapper | None = None
+    batch: SqlWrapper | None = None
     try:
+        apollo = SqlWrapper(
+            {
+                "env": args.environment,
+                "method": "pyodbc",
+                "server": "apollo",
+                "db": "worldwide",
+                "debug": True,
+                "format": "json",
+            }
+        )
+
+        batch = SqlWrapper(
+            {
+                "env": args.environment,
+                "method": "psycopg2",
+                "server": f"pg{args.environment}",
+                "db": "batch",
+                "credentials": {"user": args.username, "password": args.password},
+                "debug": True,
+                "format": "json",
+            }
+        )
+
         process_date = datetime.strptime(args.process_date, "%Y-%m-%d")
         slo_date = process_date + timedelta(days=1)
         dow_int = process_date.weekday()
@@ -117,8 +119,10 @@ def main() -> int:
         )
         return 1
     finally:
-        apollo.close()
-        batch.close()
+        if apollo is not None:
+            apollo.close()
+        if batch is not None:
+            batch.close()
 
 
 if __name__ == "__main__":
