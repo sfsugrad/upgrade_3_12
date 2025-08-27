@@ -1,2 +1,6 @@
-#IDE Files
-.idea/*
+# IDE Files
+.idea/
+
+# Virtual environments
+.venv/
+__pycache__/
