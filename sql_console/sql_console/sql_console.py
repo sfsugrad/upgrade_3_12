@@ -10,7 +10,7 @@ class SqlWrapper():
         import pymysql
         #import mysql.connector as myc
         import psycopg2
-        from hosts import db
+        from .hosts import db
 
         self.env = param['env']
         self.server = param['server']
@@ -148,7 +148,8 @@ class SqlWrapper():
                 # https://stackoverflow.com/a/27422384/2237552
                 elif self.method == 'pyodbc' and 'dict' in param:
                     if param['results'] is True:
-                        return [dict(zip(zip(*self.cursor.description)[0], row)) for row in self.cursor.fetchall()]
+                        columns = [desc[0] for desc in self.cursor.description]
+                        return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
                     else:
                         return True
                 else:
@@ -174,7 +175,8 @@ class SqlWrapper():
                 if self.debug:
                     print('SqlWrapper.proc: executing query: {CALL ' + param['proc'] + ' (' + str(''.join(['?,' for i in param['params']]))[:-1] + ')}, ' + str(param['params']))
                 self.cursor.execute('{CALL ' + param['proc'] + ' (' + str(''.join(['?,' for i in param['params']]))[:-1] + ')}',param['params'])
-                return [dict(zip(zip(*self.cursor.description)[0], row)) for row in self.cursor.fetchall()]
+                columns = [desc[0] for desc in self.cursor.description]
+                return [dict(zip(columns, row)) for row in self.cursor.fetchall()]
             except pyodbc.Error as cerr:
                 if self.debug:
                     print('SqlWrapper.proc: error: proc failed: ' + str(cerr))
