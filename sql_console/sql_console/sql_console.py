@@ -92,12 +92,7 @@ class SqlWrapper:
         if method == 'pymssql':
             return self._connect_pymssql(credentials, database)
         if method == 'pymysql':
-            return pymysql.connect(
-                host=db[self.env][self.server],
-                user=credentials['user'],
-                password=credentials['password'],
-                autocommit=True,
-            )
+            return self._connect_pymysql(credentials, database)
         if method == 'psycopg2':
             return self._connect_psycopg2(credentials, database)
 
@@ -156,6 +151,18 @@ class SqlWrapper:
         if database:
             kwargs['database'] = database
         return pymssql.connect(**kwargs)
+
+    def _connect_pymysql(self, credentials: Dict[str, Any], database: str | None):
+        connection_kwargs = {
+            'host': db[self.env][self.server],
+            'user': credentials['user'],
+            'password': credentials['password'],
+            'autocommit': True,
+        }
+        if database:
+            connection_kwargs['database'] = database
+
+        return pymysql.connect(**connection_kwargs)
 
     def _connect_psycopg2(self, credentials: Dict[str, Any], database: str | None):
         if not database:
