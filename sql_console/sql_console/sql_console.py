@@ -131,7 +131,7 @@ class SqlWrapper:
         parts = [f'DRIVER={driver}', f'SERVER={server}']
 
         if driver == '{SQL Server}':
-            parts.append('PORT=1443')
+            parts.append('PORT=1433')
 
         user = credentials.get('user')
         password = credentials.get('password')
