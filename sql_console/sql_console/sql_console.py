@@ -1,200 +1,342 @@
+"""Database connectivity helper utilities."""
+from __future__ import annotations
+
+from typing import Any, Dict, Iterable, List, Sequence
+
+import pyodbc
+import pymssql
+import pymysql
+import psycopg2
+
+from .hosts import db
+
+
+DRIVER_ERRORS: tuple[type[Exception], ...] = (
+    pyodbc.Error,
+    pymssql.Error,
+    pymysql.Error,
+    psycopg2.Error,
+)
+
+
 class SqlWrapperConnectionError(Exception):
-    pass
+    """Raised when the wrapper cannot establish a connection to the database."""
 
 
-class SqlWrapper():
+class SqlWrapper:
+    """Wrap a handful of database client libraries with a unified interface."""
 
-    def __init__(self, param):
-        import pyodbc
-        import pymssql
-        import pymysql
-        #import mysql.connector as myc
-        import psycopg2
-        from hosts import db
-
+    def __init__(self, param: Dict[str, Any]):
         self.env = param['env']
         self.server = param['server']
-        self.debug = param['debug']
-        self.format = param['format']
+        self.debug = param.get('debug', False)
+        self.format = param.get('format')
         self.method = param['method']
 
         if self.server not in db[self.env]:
             db[self.env][self.server] = self.server
 
-        self.c = {self.env: {}}
+        self.c: Dict[str, Dict[str, Any]] = {self.env: {}}
+
+        credentials = param.get('credentials') or {}
+
+        if self.debug:
+            print('SqlWrapper.init: info: connecting to ' + db[self.env][self.server])
+
         try:
-            if self.debug:
-                print('SqlWrapper.init: info: connecting to ' + db[self.env][self.server])
-            if self.method == 'pyodbc':
-                try:
-                    if 'credentials' in param:
-                        if 'db' in param:
-                            self.c[self.env][self.server] = pyodbc.connect('DRIVER={SQL Server};SERVER=' + db[self.env][self.server] + ';PORT=1443;UID=APEXCLEARING\\' + param['credentials']['user'] + ';PWD=' + param['credentials']['password'] + ';DATABASE=' + param['db'] + ';trusted_connection=yes', autocommit=True)
-                        else:
-                            self.c[self.env][self.server] = pyodbc.connect('DRIVER={SQL Server};SERVER=' + db[self.env][self.server] + ';PORT=1443;UID=APEXCLEARING\\' + param['credentials']['user'] + ';PWD=' + param['credentials']['password'] + ';trusted_connection=yes', autocommit=True)
-                    else:
-                        if 'db' in param:
-                            self.c[self.env][self.server] = pyodbc.connect('DRIVER={SQL Server};SERVER=' + db[self.env][self.server] + ';PORT=1443;DATABASE=' + param['db'] + ';trusted_connection=yes', autocommit=True)
-                        else:
-                            self.c[self.env][self.server] = pyodbc.connect('DRIVER={SQL Server};SERVER=' + db[self.env][self.server] + ';PORT=1443;trusted_connection=yes', autocommit=True)
-                except pyodbc.Error as pyodbcerr:
-                    if self.debug:
-                        print('SqlWrapper.init.pyodbc: error: could not connect to ' + db[self.env][self.server] + ': message: ' + str(pyodbcerr))
-                        print('SqlWrapper.init.pyodbc: info: attempting to connect with FreeTDS driver...')
-                    # linux workaround for connecting to SQL server via pyodbc and FreeTDS
-                    try:
-                        if 'credentials' in param:
-                            self.c[self.env][self.server] = pyodbc.connect('DRIVER={FreeTDS};SERVER=' + db[self.env][self.server] + ';UID=APEXCLEARING\\' + param['credentials']['user'] + ';PWD=' + param['credentials']['password'] + ';trusted_connection=yes')
-                        else:
-                            self.c[self.env][self.server] = pyodbc.connect('DRIVER={FreeTDS};SERVER=' + db[self.env][self.server] + ';trusted_connection=yes')
-                    except pyodbc.Error as pyodbcerr:
-                        raise SqlWrapperConnectionError('SqlWrapper.init.pyodbc: error: could not connect to ' + db[self.env][self.server] + ' with user ' + param['credentials']['user'] + ': message: ' + str(pyodbcerr))
+            connection = self._create_connection(param, credentials)
+        except DRIVER_ERRORS as connection_error:
+            raise SqlWrapperConnectionError(
+                'SqlWrapper.init: error: could not connect to '
+                + db[self.env][self.server]
+                + ' with user '
+                + credentials.get('user', '<unknown>')
+                + ': message: '
+                + str(connection_error)
+            ) from connection_error
 
-            elif self.method == 'dsn':
-                self.c[self.env][self.server] = pyodbc.connect('DSN=' + self.server + ';UID=' + param['credentials']['user'] + ';PWD=' + param['credentials']['password'] + ';trusted_connection=yes')
-            elif self.method == 'pymssql':
-                if 'db' in param:
-                    self.c[self.env][self.server] = pymssql.connect(server=db[self.env][self.server], user='APEXCLEARING\\'+param['credentials']['user'], password=param['credentials']['password'], database=param['db'], autocommit=True)
-                else:
-                    self.c[self.env][self.server] = pymssql.connect(server=db[self.env][self.server], user='APEXCLEARING\\' + param['credentials']['user'], password=param['credentials']['password'], autocommit=True)
-            elif self.method == 'pymysql':
-                self.c[self.env][self.server] = pymysql.connect(host=db[self.env][self.server], user=param['credentials']['user'], password=param['credentials']['password'], autocommit=True)
-            #elif self.method == 'mysqlclient':
-                #self.c[self.env][self.server] = myc.connect(param['credentials']['user'], param['credentials']['password'], host=db[self.env][self.server], buffered=True)
-            elif self.method == 'psycopg2':
-                if 'credentials' in param:
-                    self.c[self.env][self.server] = psycopg2.connect(dbname=param['db'], user=param['credentials']['user'], password=param['credentials']['password'], host=db[self.env][self.server], port=5432)
-                else:
-                    self.c[self.env][self.server] = psycopg2.connect(dbname=param['db'], user=param['credentials']['user'], password=param['credentials']['password'], host=db[self.env][self.server], port=5432)
-        except pyodbc.Error as PyPyODBC:
-            raise SqlWrapperConnectionError('SqlWrapper.init.pyodbc: error: could not connect to ' + db[self.env][self.server] + ' with user ' + param['credentials']['user'] + ': message: ' + str(PyPyODBC))
-        except pymssql.Error as sqlerror:
-            raise SqlWrapperConnectionError('SqlWrapper.init.pymssql: error: could not connect to ' + db[self.env][self.server] + ' with user ' +param['credentials']['user'] + ': message: ' + str(sqlerror))
-        except pymysql.Error as sqlerror:
-            raise SqlWrapperConnectionError('SqlWrapper.init.pymysql: error: could not connect to ' + db[self.env][self.server] + ' with user ' +param['credentials']['user'] + ': message: ' + str(sqlerror))
-        #except myc.Error as mycerror:
-            #if self.debug:
-                #print('SqlWrapper.init.mysqlclient: error: could not connect to ' + db[self.env][self.server] + ' with user ' +param['credentials']['user'] + ': message: ' + str(mycerror))
-        except psycopg2.Error as psycopg2err:
-            raise SqlWrapperConnectionError('SqlWrapper.init.psycopg2: error: could not connect to ' + db[self.env][self.server] + ' with user ' +param['credentials']['user'] + ': message: ' + str(psycopg2err))
+        self.c[self.env][self.server] = connection
 
-        # call autocommit method for certain connection methods
         if self.method not in ['pymssql', 'pymysql']:
-            self.c[self.env][self.server].autocommit = True
+            connection.autocommit = True
 
-        # initialize cursors - return results as dictionary
+        self.cursor = self._create_cursor(connection)
+
+    def __enter__(self) -> 'SqlWrapper':
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
+
+    def close(self) -> None:
+        self.c[self.env][self.server].close()
+
+    def _create_connection(self, param: Dict[str, Any], credentials: Dict[str, Any]):
+        method = self.method
+        database = param.get('db')
+
+        if method in {'dsn', 'pymssql', 'pymysql'}:
+            self._validate_credentials(credentials, method)
+
+        if method == 'pyodbc':
+            return self._connect_pyodbc(credentials, database)
+        if method == 'dsn':
+            return pyodbc.connect(
+                'DSN=' + self.server
+                + ';UID='
+                + credentials['user']
+                + ';PWD='
+                + credentials['password']
+                + ';trusted_connection=yes'
+            )
+        if method == 'pymssql':
+            return self._connect_pymssql(credentials, database)
+        if method == 'pymysql':
+            return pymysql.connect(
+                host=db[self.env][self.server],
+                user=credentials['user'],
+                password=credentials['password'],
+                autocommit=True,
+            )
+        if method == 'psycopg2':
+            return self._connect_psycopg2(credentials, database)
+
+        raise SqlWrapperConnectionError('SqlWrapper.init: error: method "' + method + '" is not supported')
+
+    def _create_cursor(self, connection):
         if self.method == 'pymysql':
-            self.cursor = self.c[self.env][self.server].cursor(pymysql.cursors.DictCursor)
-        elif self.method == 'pymssql':
-            self.cursor = self.c[self.env][self.server].cursor(as_dict=True)
-        else:
-            self.cursor = self.c[self.env][self.server].cursor()
+            return connection.cursor(pymysql.cursors.DictCursor)
+        if self.method == 'pymssql':
+            return connection.cursor(as_dict=True)
+        return connection.cursor()
 
-    def __exit__(self):
-        self.c[self.env][self.server].close()
+    def _connect_pyodbc(self, credentials: Dict[str, Any], database: str | None):
+        connection_string = self._build_pyodbc_connection_string(credentials, database, '{SQL Server}')
+        try:
+            return pyodbc.connect(connection_string, autocommit=True)
+        except pyodbc.Error as pyodbc_error:
+            if self.debug:
+                print(
+                    'SqlWrapper.init.pyodbc: error: could not connect to '
+                    + db[self.env][self.server]
+                    + ': message: '
+                    + str(pyodbc_error)
+                )
+                print('SqlWrapper.init.pyodbc: info: attempting to connect with FreeTDS driver...')
+            freetds_connection_string = self._build_pyodbc_connection_string(credentials, database, '{FreeTDS}')
+            return pyodbc.connect(freetds_connection_string, autocommit=True)
 
-    def close(self):
-        self.c[self.env][self.server].close()
+    def _build_pyodbc_connection_string(self, credentials: Dict[str, Any], database: str | None, driver: str) -> str:
+        server = db[self.env][self.server]
+        parts = [f'DRIVER={driver}', f'SERVER={server}']
 
-    def query(self, param):
+        if driver == '{SQL Server}':
+            parts.append('PORT=1443')
+
+        user = credentials.get('user')
+        password = credentials.get('password')
+
+        if user and password:
+            parts.append(f'UID=APEXCLEARING\\{user}')
+            parts.append(f'PWD={password}')
+
+        if database:
+            parts.append(f'DATABASE={database}')
+
+        parts.append('trusted_connection=yes')
+        return ';'.join(parts)
+
+    def _connect_pymssql(self, credentials: Dict[str, Any], database: str | None):
+        kwargs = {
+            'server': db[self.env][self.server],
+            'user': 'APEXCLEARING\\' + credentials['user'],
+            'password': credentials['password'],
+            'autocommit': True,
+        }
+        if database:
+            kwargs['database'] = database
+        return pymssql.connect(**kwargs)
+
+    def _connect_psycopg2(self, credentials: Dict[str, Any], database: str | None):
+        if not database:
+            raise SqlWrapperConnectionError('SqlWrapper.init.psycopg2: error: "db" parameter is required for psycopg2 connections')
+
+        connection_kwargs: Dict[str, Any] = {
+            'dbname': database,
+            'host': db[self.env][self.server],
+            'port': 5432,
+        }
+        if 'user' in credentials:
+            connection_kwargs['user'] = credentials['user']
+        if 'password' in credentials:
+            connection_kwargs['password'] = credentials['password']
+
+        return psycopg2.connect(**connection_kwargs)
+
+    def _validate_credentials(self, credentials: Dict[str, Any], method: str) -> None:
+        if 'user' not in credentials or 'password' not in credentials:
+            raise SqlWrapperConnectionError(
+                f'SqlWrapper.init.{method}: error: credentials with "user" and "password" are required'
+            )
+
+    def query(self, param: Dict[str, Any]):
         if 'db' in param:
             if self.debug:
-                print('SqlWrapper.query: info: switching database to "' + param['db'] + '"')
+                print('SqlWrapper.query: info: switching database to "' + str(param['db']) + '"')
             try:
-                self.cursor.execute('USE ' + param['db'])
-            except self.cursor.Error as cerr:
+                self._switch_database(param['db'])
+            except SqlWrapperConnectionError as switch_error:
                 if self.debug:
-                    print('SqlWrapper.query: error: query failed: ' + str(cerr))
+                    print('SqlWrapper.query: error: ' + str(switch_error))
                 return False
 
-        if 'results' in param:
-            if isinstance(param['query'], list):
-                output = []
-                for q in param['query']:
-                    try:
-                        self.cursor.execute(q)
-                    except Exception as cerr:
-                        if self.debug:
-                            print('SqlWrapper.query: error: query failed: ' + str(cerr))
-                        return False
-                    output.append([i[0] for i in self.cursor.fetchall()])
-                if param['results'] is True:
-                    return output
-                else:
-                    return True
-
-            elif isinstance(param['query'], str):
-                if self.debug:
-                    print('SqlWrapper.query: info: executing query')
-
-                try:
-                    self.cursor.execute(param['query'])
-                except Exception as cerr:
-                    if self.debug:
-                        print('SqlWrapper.query: error: query failed: ' + str(cerr))
-                    return False
-
-                if self.method == 'psycopg2':
-                    # description method will be None if the query does not return results
-                    if self.cursor.description is None:
-                        return True
-                    else:
-                        if param['results'] is True:
-                            return self.cursor.fetchall()
-                        else:
-                            return True
-
-                # TODO: cheating with ''dict' in param' because current code is not compatible - should be 'param['dict'] is True'
-                # https://stackoverflow.com/a/27422384/2237552
-                elif self.method == 'pyodbc' and 'dict' in param:
-                    if param['results'] is True:
-                        return [dict(zip(zip(*self.cursor.description)[0], row)) for row in self.cursor.fetchall()]
-                    else:
-                        return True
-                else:
-                    if param['results'] is True:
-                        return self.cursor.fetchall()
-                    else:
-                        return True
-
-            else:
-                if self.debug:
-                    print('SqlWrapper.query: error: "query" parameter invalid, expecting list or string')
-                return False
-        else:
+        if 'results' not in param:
             if self.debug:
                 print('SqlWrapper.query: error: expecting "results" parameter')
             return False
 
-    def proc(self, param):
-        import pymssql, pyodbc
+        query_definition = param['query']
+        results_requested = param['results'] is True
+        dict_requested = param.get('dict') is True
 
-        if self.method == 'pyodbc':
+        if isinstance(query_definition, list):
+            output: List[List[Any]] = []
+            for query_string in query_definition:
+                try:
+                    self.cursor.execute(query_string)
+                except DRIVER_ERRORS as query_error:
+                    if self.debug:
+                        print('SqlWrapper.query: error: query failed: ' + str(query_error))
+                    return False
+                rows = self.cursor.fetchall()
+                output.append([row[0] for row in rows])
+            return output if results_requested else True
+
+        if isinstance(query_definition, str):
+            if self.debug:
+                print('SqlWrapper.query: info: executing query')
+
             try:
+                parameters = param.get('parameters')
+                if parameters is not None:
+                    self.cursor.execute(query_definition, parameters)
+                else:
+                    self.cursor.execute(query_definition)
+            except DRIVER_ERRORS as query_error:
                 if self.debug:
-                    print('SqlWrapper.proc: executing query: {CALL ' + param['proc'] + ' (' + str(''.join(['?,' for i in param['params']]))[:-1] + ')}, ' + str(param['params']))
-                self.cursor.execute('{CALL ' + param['proc'] + ' (' + str(''.join(['?,' for i in param['params']]))[:-1] + ')}',param['params'])
-                return [dict(zip(zip(*self.cursor.description)[0], row)) for row in self.cursor.fetchall()]
-            except pyodbc.Error as cerr:
-                if self.debug:
-                    print('SqlWrapper.proc: error: proc failed: ' + str(cerr))
+                    print('SqlWrapper.query: error: query failed: ' + str(query_error))
                 return False
 
-        #TODO: pymssql callproc is not working correctly - not sure why
-        elif self.method == 'pymssql':
-            try:
-                self.cursor.callproc(param['proc'], param['params'])
-                results = self.cursor.fetchall()
-                while results:
-                    if self.cursor.nextset():
-                        results.append(self.cursor.fetchall())
-                    else:
-                        return results
-            except pymssql.Error as cerr:
-                if self.debug:
-                    print('SqlWrapper.proc: error: proc failed: ' + str(cerr))
+            return self._fetch_query_results(results_requested, dict_requested)
 
+        if self.debug:
+            print('SqlWrapper.query: error: "query" parameter invalid, expecting list or string')
+        return False
+
+    def _switch_database(self, database: Any) -> None:
+        database_name = self._validate_database_name(database)
+
+        if self.method in {'pyodbc', 'dsn', 'pymssql'}:
+            statement = f'USE {self._quote_identifier(database_name, "bracket")}'
+        elif self.method == 'pymysql':
+            statement = f'USE {self._quote_identifier(database_name, "backtick")}'
+        elif self.method == 'psycopg2':
+            raise SqlWrapperConnectionError('SqlWrapper.query: error: psycopg2 connections do not support switching databases')
         else:
+            statement = 'USE ' + database_name
+
+        try:
+            self.cursor.execute(statement)
+        except DRIVER_ERRORS as switch_error:
+            raise SqlWrapperConnectionError(
+                'SqlWrapper.query: error: failed to switch database to "'
+                + database_name
+                + '": '
+                + str(switch_error)
+            ) from switch_error
+
+    def _validate_database_name(self, database: Any) -> str:
+        if not isinstance(database, str):
+            raise SqlWrapperConnectionError('SqlWrapper.query: error: database name must be a string')
+        if not database.strip():
+            raise SqlWrapperConnectionError('SqlWrapper.query: error: database name must not be empty')
+        return database
+
+    def _quote_identifier(self, identifier: str, style: str) -> str:
+        if style == 'bracket':
+            return '[' + identifier.replace(']', ']]') + ']'
+        if style == 'backtick':
+            return '`' + identifier.replace('`', '``') + '`'
+        return identifier
+
+    def _fetch_query_results(self, results_requested: bool, dict_requested: bool):
+        if not results_requested:
+            return True
+
+        if self.cursor.description is None:
+            return True
+
+        rows = self.cursor.fetchall()
+
+        if self.method in {'pyodbc', 'dsn'} and dict_requested:
+            return self._rows_as_dicts(rows)
+
+        return rows
+
+    def _rows_as_dicts(self, rows: Iterable[Sequence[Any]]) -> List[Dict[str, Any]]:
+        columns = [column[0] for column in self.cursor.description]
+        return [dict(zip(columns, row)) for row in rows]
+
+    def proc(self, param: Dict[str, Any]):
+        procedure = param['proc']
+        parameters: Sequence[Any] = param.get('params', [])
+        as_dict = param.get('dict') is True
+
+        try:
+            if self.method in {'pyodbc', 'dsn'}:
+                return self._execute_pyodbc_proc(procedure, parameters, as_dict)
+            if self.method == 'pymssql':
+                return self._execute_pymssql_proc(procedure, parameters)
+        except DRIVER_ERRORS as proc_error:
             if self.debug:
-                print('SqlWrapper.proc: error: method "' + self.method + '" is not supported')
-            return None
+                print('SqlWrapper.proc: error: proc failed: ' + str(proc_error))
+            return False
+
+        if self.debug:
+            print('SqlWrapper.proc: error: method "' + self.method + '" is not supported')
+        return False
+
+    def _execute_pyodbc_proc(self, procedure: str, parameters: Sequence[Any], as_dict: bool):
+        placeholders = ', '.join('?' for _ in parameters)
+        call = f'{{CALL {procedure}}}' if not placeholders else f'{{CALL {procedure} ({placeholders})}}'
+        if self.debug:
+            print('SqlWrapper.proc: executing query: ' + call + ', ' + str(tuple(parameters)))
+        self.cursor.execute(call, parameters)
+
+        if self.cursor.description is None:
+            return True
+
+        rows = self.cursor.fetchall()
+        if as_dict:
+            return self._rows_as_dicts(rows)
+        return rows
+
+    def _execute_pymssql_proc(self, procedure: str, parameters: Sequence[Any]):
+        self.cursor.callproc(procedure, parameters)
+        results: List[List[Any]] = []
+
+        while True:
+            try:
+                rows = self.cursor.fetchall()
+            except pymssql.ProgrammingError:
+                rows = []
+            if rows:
+                results.append(rows)
+            if not self.cursor.nextset():
+                break
+
+        if not results:
+            return True
+        if len(results) == 1:
+            return results[0]
+        return results
