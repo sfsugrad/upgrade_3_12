@@ -10,7 +10,7 @@ class SqlWrapper():
         import pymysql
         #import mysql.connector as myc
         import psycopg2
-        from hosts import db
+        from .hosts import db
 
         self.env = param['env']
         self.server = param['server']
@@ -90,6 +90,15 @@ class SqlWrapper():
         else:
             self.cursor = self.c[self.env][self.server].cursor()
 
+    def _rows_to_dicts(self, rows):
+        """Return query results as dictionaries keyed by column name."""
+        description = self.cursor.description
+        if not description:
+            return []
+
+        column_names = [column[0] for column in description]
+        return [dict(zip(column_names, row)) for row in rows]
+
     def __exit__(self):
         self.c[self.env][self.server].close()
 
@@ -148,7 +157,7 @@ class SqlWrapper():
                 # https://stackoverflow.com/a/27422384/2237552
                 elif self.method == 'pyodbc' and 'dict' in param:
                     if param['results'] is True:
-                        return [dict(zip(zip(*self.cursor.description)[0], row)) for row in self.cursor.fetchall()]
+                        return self._rows_to_dicts(self.cursor.fetchall())
                     else:
                         return True
                 else:
@@ -173,8 +182,8 @@ class SqlWrapper():
             try:
                 if self.debug:
                     print('SqlWrapper.proc: executing query: {CALL ' + param['proc'] + ' (' + str(''.join(['?,' for i in param['params']]))[:-1] + ')}, ' + str(param['params']))
-                self.cursor.execute('{CALL ' + param['proc'] + ' (' + str(''.join(['?,' for i in param['params']]))[:-1] + ')}',param['params'])
-                return [dict(zip(zip(*self.cursor.description)[0], row)) for row in self.cursor.fetchall()]
+                self.cursor.execute('{CALL ' + param['proc'] + ' (' + str(''.join(['?,' for i in param['params']]))[:-1] + ')}', param['params'])
+                return self._rows_to_dicts(self.cursor.fetchall())
             except pyodbc.Error as cerr:
                 if self.debug:
                     print('SqlWrapper.proc: error: proc failed: ' + str(cerr))
