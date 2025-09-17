@@ -8,7 +8,6 @@ class SqlWrapper():
         import pyodbc
         import pymssql
         import pymysql
-        #import mysql.connector as myc
         import psycopg2
         from .hosts import db
 
