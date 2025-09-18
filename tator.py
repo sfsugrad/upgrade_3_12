@@ -1,94 +1,189 @@
-import argparse
-
-import requests
-
 import sys
 
-import time
+import argparse
 
-from datetime import datetime, timezone
+from sql_console.sql_console import SqlWrapper
 
-parser = argparse.ArgumentParser(description='add annotations to grafana')
+parser = argparse.ArgumentParser()
 
-parser.add_argument('--host', metavar='HOST', type=str, required=True, help='grafana host')
+parser.add_argument(
 
-parser.add_argument('--token', metavar='TOKEN', type=str, required=True,
-                    help='API token to pass in Authorization header')
+    '--process-date',
 
-parser.add_argument('--text', metavar='TEXT', type=str, required=True, help='annotation text')
+    dest='process_date',
 
-parser.add_argument('--dashboard', metavar='DASHBOARD_ID', type=int, required=False, default=None,
-                    help='dashboard to annotate')
+    type=str,
 
-parser.add_argument('--panel', metavar='PANEL_ID', type=int, required=False, default=None, help='panel to annotate')
+    default=None,
 
-parser.add_argument('--tags', metavar='[TAG,...]', type=lambda s: [str(i).strip() for i in s.split(',')],
-                    required=False, default=None, help='annotation tags')
+    help='YYYY-MM-DD')
 
-parser.add_argument('--time', metavar='TIME', type=int, required=False, default=None,
-                    help='instantaneous Unix epoch time in milliseconds')
+parser.add_argument(
 
-parser.add_argument('--timeStr', metavar='%Y-%m-%dT%H:%M:%S', type=str, required=False, default=None,
-                    help='datetime string formatted as %yyyy-%mm-%ddT%hh:%mm:%ss')
+    '--environment',
+
+    dest='environment',
+
+    type=str,
+
+    default=None,
+
+    help='Environment: [dev][uat][prd]')
+
+parser.add_argument(
+
+    '--postgres-username',
+
+    dest='username',
+
+    type=str,
+
+    default=None,
+
+    help='Postgres username')
+
+parser.add_argument(
+
+    '--postgres-password',
+
+    dest='password',
+
+    type=str,
+
+    default=None,
+
+    help='Postgres password')
+
+parser.add_argument(
+
+    '--query',
+
+    dest='query',
+
+    type=str,
+
+    default=None,
+
+    help='Filename that contains relevant query')
+
+parser.add_argument(
+
+    '--origin',
+
+    dest='origin',
+
+    type=str,
+
+    default=None,
+
+    help='Server where data originates')
+
+parser.add_argument(
+
+    '--query-parameters',
+
+    dest='query_parameters',
+
+    type=str,
+
+    default=None,
+
+    help='CSV list of parameters to replace placeholders in specified query')
 
 args = parser.parse_args()
 
-if __name__ == '__main__':
+if args.origin == 'ozark':
 
-    headers = {'Authorization': 'Bearer ' + args.token, 'Accept': 'application/json',
-               'Content-Type': 'application/json'}
+    connection = SqlWrapper(
+        {'env': args.environment, 'method': 'pyodbc', 'server': 'ozark', 'db': 'admiral', 'debug': True,
+         'format': 'json'})
 
-    json_body = {
+elif args.orgin == 'eagle':
 
-        "dashboardId": args.dashboard,
+    connection = SqlWrapper(
+        {'env': args.environment, 'method': 'pyodbc', 'server': 'eagle', 'db': 'tradeking', 'debug': True,
+         'format': 'json'})
 
-        "panelId": args.panel,
+elif args.orgin == 'hood':
 
-        "time": args.time,
+    connection = SqlWrapper(
+        {'env': args.environment, 'method': 'pyodbc', 'server': 'hood', 'db': 'fbidb', 'debug': True, 'format': 'json'})
 
-        "tags": args.tags,
+elif args.orgin == 'apollo':
 
-        "text": args.text
+    connection = SqlWrapper(
+        {'env': args.environment, 'method': 'pyodbc', 'server': 'apollo', 'db': 'worldwide', 'debug': True,
+         'format': 'json'})
 
-    }
+else:
 
-    if args.dashboard is None:
-        del json_body['dashboardId']
+    print('Rory is dum')
 
-    if args.panel is None:
-        del json_body['panelId']
+    sys.exit(1)
 
-    if args.tags is None:
-        del json_body['tags']
+batch = SqlWrapper({'env': args.environment, 'method': 'psycopg2', 'server': 'pg' + args.environment, 'db': 'batch',
+                    'credentials': {'user': args.username, 'password': args.password}, 'debug': True, 'format': 'json'})
 
-    if args.time is None and args.timeStr is None:
+# parse query parameters into correct format
 
-        args.time = int(time.time() * 1000)
+if args.query_parameters is not None:
+    args.query_parameters = args.query_parameters.split(',')
 
-    elif args.time is None and args.timeStr is not None:
+with open('sql/' + args.query, 'rt') as f:
+    tidal_script = str(f.read()).replace('\n', ' ')
 
-        args.time = int(
-            datetime.strptime(args.timeStr, '%Y-%m-%dT%H:%M:%S')
-            .replace(tzinfo=timezone.utc)
-            .timestamp() * 1000
-        )
+if '[[PROCESSDATE]]' in tidal_script:
+    tidal_script = tidal_script.replace('[[PROCESSDATE]]', '\'' + args.process_date + '\'')
 
-    r = requests.post(
+if args.query_parameters is not None:
 
-        args.host + '/api/annotations',
+    for index, p in enumerate(args.query_parameters):
 
-        headers=headers,
+        if '[[' + str(index) + ']]' in tidal_script:
+            tidal_script = tidal_script.replace('[[' + str(index) + ']]', '\'' + str(p) + '\'')
 
-        json=json_body
+print('tidal_to_grafana: info: tidal query: ' + tidal_script)
 
-    )
+tidal_source_results = connection.query({'query': tidal_script, 'results': True})
 
-    if r.status_code != 200:
+tidal_source_results = [i[0] for i in tidal_source_results]  # tuple to list
 
-        print(f"{r.status_code}: {r.text}")
+if len(tidal_source_results) > 0:
 
-        sys.exit(1)
+    print('tidal source results:')
 
-    else:
+    for sr in tidal_source_results:
 
-        sys.exit(0)
+        if sr is not None:
+
+            if sr is not False:
+
+                print(str(sr))
+
+                dest_results = batch.query({'query': str(sr), 'results': True})
+
+                # dest_results = True
+
+                if dest_results is False:
+
+                    print('tidal_to_grafana: error: destination query failed: ' + str(sr))
+
+                    # sys.exit(1)
+
+                else:
+
+                    continue
+
+            else:
+
+                sys.exit(1)
+
+        else:
+
+            continue
+
+else:
+
+    print('tidal_to_grafana: error: script returned no INSERT records...')
+
+    sys.exit(1)

@@ -1,170 +1,130 @@
-from __future__ import annotations
-
 import argparse
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import List, Optional
 
+import datetime
 
-SQL_DIR = Path(__file__).resolve().parent / "sql"
-EXT_001 = "001"
+from sql_console.sql_console import SqlWrapper
 
+parser = argparse.ArgumentParser(
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Gets SOD extract runs from ReportRequest and ships them to Postgres"
-    )
-    parser.add_argument(
-        "--environment",
-        dest="environment",
-        type=str,
-        default=None,
-        help="Environment: [prod][uat][dev]",
-    )
-    parser.add_argument(
-        "--process-date",
-        dest="process_date",
-        type=str,
-        default=None,
-        help="YYYY-MM-DD",
-    )
-    parser.add_argument(
-        "--postgres-username",
-        dest="username",
-        type=str,
-        default=None,
-        help="Username for Postgres",
-    )
-    parser.add_argument(
-        "--postgres-password",
-        dest="password",
-        type=str,
-        default=None,
-        help="Password for Postgres",
-    )
-    parser.add_argument(
-        "--notgucci-argument-001",
-        dest="flag_001",
-        action="store_true",
-        help="Stupid workaround for EXT001",
-    )
-    parser.set_defaults(flag_001=False)
-    return parser.parse_args(argv)
+    description='Gets SOD extract runs from ReportRequest and ships them to Postgres')
 
+parser.add_argument(
 
-def read_sql(path: Path) -> str:
-    """Read a SQL file and collapse newlines."""
-    try:
-        return Path(path).read_text(encoding="utf-8").replace("\n", " ")
-    except OSError as exc:
-        raise FileNotFoundError(f"Unable to read SQL file: {path}") from exc
+    '--environment',
 
+    dest='environment',
 
-def main() -> None:
-    from sql_console.sql_console import SqlWrapper
+    type=str,
 
-    args = parse_args()
-    # calculate next day from given process date
-    nextday = datetime.strptime(args.process_date, "%Y-%m-%d") + timedelta(days=1)
+    default=None,
 
-    apollo = SqlWrapper(
-        {
-            "env": args.environment,
-            "method": "pyodbc",
-            "server": "apollo",
-            "db": "worldwide",
-            "debug": True,
-            "format": "json",
-        }
-    )
+    help='Environment: [prod][uat][dev]')
 
-    batch = SqlWrapper(
-        {
-            "env": args.environment,
-            "method": "psycopg2",
-            "server": f"pg{args.environment}",
-            "db": "batch",
-            "credentials": {"user": args.username, "password": args.password},
-            "debug": True,
-            "format": "json",
-        }
-    )
+parser.add_argument(
 
-    # query for all extracts excluding EXT001
-    try:
-        sod_extracts = read_sql(SQL_DIR / "sod_extracts.sql")
-        sod_extracts_results = apollo.query(
-            {
-                "query": sod_extracts,
-                "params": {"process_date": args.process_date},
-                "results": True,
-            }
-        )
-    except Exception as exc:
-        print(f"Failed to fetch SOD extracts: {exc}")
-        sod_extracts_results = []
+    '--process-date',
 
-    if args.flag_001:
-        # query for EXT001
-        try:
-            sod_001 = read_sql(SQL_DIR / "sod_extract_001.sql")
-            sod_001_results = apollo.query(
-                {
-                    "query": sod_001,
-                    "params": {"process_date": nextday.strftime("%Y-%m-%d")},
-                    "results": True,
-                }
-            )
-            if sod_001_results:
-                sod_extracts_results.extend(sod_001_results)
-        except Exception as exc:
-            print(f"Failed to fetch EXT{EXT_001} data: {exc}")
+    dest='process_date',
 
-    try:
-        existing_query = (
-            "SELECT extract FROM batch.sod_extract_runs WHERE process_date=%(process_date)s"
-        )
-        extracts_already_in_postgres = [
-            i[0]
-            for i in batch.query(
-                {
-                    "query": existing_query,
-                    "params": {"process_date": args.process_date},
-                    "results": True,
-                }
-            )
-        ]
-    except Exception as exc:
-        print(f"Failed to check existing extracts: {exc}")
-        extracts_already_in_postgres = []
+    type=str,
 
-    for r in sod_extracts_results:
-        if r[1] not in extracts_already_in_postgres:
-            process_date_val = (
-                nextday.strftime("%Y-%m-%d %H:%M:%S") if r[1] == EXT_001 else args.process_date
-            )
-            params = {
-                "process_date": process_date_val,
-                "extract": f"EXT{r[1]}",
-                "end_time": r[0].strftime("%Y-%m-%d %H:%M:%S"),
-            }
-            try:
-                batch.query(
-                    {
-                        "query": (
-                            "INSERT INTO batch.sod_extract_runs "
-                            "(process_date,extract,end_time) VALUES "
-                            "(%(process_date)s,%(extract)s,%(end_time)s)"
-                        ),
-                        "params": params,
-                        "results": False,
-                    }
-                )
-            except Exception as exc:
-                print(f"Failed to insert extract {r[1]}: {exc}")
+    default=None,
 
+    help='YYYY-MM-DD')
 
-if __name__ == "__main__":
-    main()
+parser.add_argument(
 
+    '--postgres-username',
+
+    dest='username',
+
+    type=str,
+
+    default=None,
+
+    help='Username for Postgres')
+
+parser.add_argument(
+
+    '--postgres-password',
+
+    dest='password',
+
+    type=str,
+
+    default=None,
+
+    help='Password for Postgres')
+
+parser.add_argument(
+
+    '--notgucci-argument-001',
+
+    dest='flag_001',
+
+    action='store_true',
+
+    help='Stupid workaround for EXT001')
+
+parser.set_defaults(flag_001=False)
+
+args = parser.parse_args()
+
+# calculate next day from given processdate
+
+nextday = datetime.datetime.strptime(args.process_date, '%Y-%m-%d') + datetime.timedelta(days=1)
+
+apollo = SqlWrapper({'env': args.environment, 'method': 'pyodbc', 'server': 'apollo', 'db': 'worldwide', 'debug': True,
+                     'format': 'json'})
+
+batch = SqlWrapper({'env': args.environment, 'method': 'psycopg2', 'server': 'pg' + args.environment, 'db': 'batch',
+                    'credentials': {'user': args.username, 'password': args.password}, 'debug': True, 'format': 'json'})
+
+# query for all extracts excluding EXT001
+
+with open('sql/sod_extracts.sql', 'rt') as f:
+    sod_extracts = str(f.read()).replace('\n', ' ')
+
+sod_extracts = sod_extracts.replace('[[PROCESSDATE]]', '\'' + args.process_date + '\'')
+
+sod_extracts_results = apollo.query({'query': sod_extracts, 'results': True})
+
+if args.flag_001 is True:
+
+    # query for EXT001
+
+    with open('sql/sod_extract_001.sql', 'rt') as f:
+
+        sod_001 = str(f.read()).replace('\n', ' ')
+
+    sod_001 = sod_001.replace('[[PROCESSDATE]]', '\'' + datetime.datetime.strftime(nextday, '%Y-%m-%d') + '\'')
+
+    sod_001_results = apollo.query({'query': sod_001, 'results': True})
+
+    if len(sod_001_results) > 0:
+
+        for r in sod_001_results:
+            sod_extracts_results.append(r)
+
+extracts_already_in_postgres = [i[0] for i in batch.query(
+    {'query': 'SELECT extract FROM batch.sod_extract_runs WHERE process_date=\'' + args.process_date + '\'',
+     'results': True})]
+
+for r in sod_extracts_results:
+
+    if r[1] not in extracts_already_in_postgres:
+
+        if r[1] == '001':
+
+            batch.query({
+                            'query': 'INSERT INTO batch.sod_extract_runs (process_date,extract,end_time) VALUES(\'' + datetime.datetime.strftime(
+                                nextday, '%Y-%m-%d %H:%M:%S') + '\', \'EXT' + r[
+                                         1] + '\', \'' + datetime.datetime.strftime(r[0], '%Y-%m-%d %H:%M:%S') + '\')',
+                            'results': False})
+
+        else:
+
+            batch.query({
+                            'query': 'INSERT INTO batch.sod_extract_runs (process_date,extract,end_time) VALUES(\'' + args.process_date + '\', \'EXT' +
+                                     r[1] + '\', \'' + datetime.datetime.strftime(r[0], '%Y-%m-%d %H:%M:%S') + '\')',
+                            'results': False})
